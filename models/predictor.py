@@ -1,0 +1,120 @@
+"""
+models/predictor.py
+نموذج التنبؤ بالنتائج - يستخدم Regression + خوارزميات AI
+"""
+
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import cross_val_score
+from sklearn.pipeline import Pipeline
+import warnings
+warnings.filterwarnings("ignore")
+
+
+class BawsalaPredictor:
+    """
+    نموذج تنبؤي متعدد الخوارزميات لتقدير درجات القياس
+    بناءً على درجات المدرسة والأداء السابق.
+    """
+
+    def __init__(self):
+        self.models = {
+            "Gradient Boosting": GradientBoostingRegressor(
+                n_estimators=100, max_depth=4, learning_rate=0.1, random_state=42
+            ),
+            "Random Forest": RandomForestRegressor(
+                n_estimators=150, max_depth=6, random_state=42
+            ),
+            "Ridge Regression": Ridge(alpha=1.0),
+        }
+        self.scaler = StandardScaler()
+        self.best_model_name = None
+        self.best_model = None
+        self.is_trained = False
+        self.feature_names = []
+
+    # ── Feature Engineering ─────────────────────────────────────────────────
+    def _build_features(self, df: pd.DataFrame) -> np.ndarray:
+        feats = pd.DataFrame()
+        feats["school_avg"]     = df["school_avg"]
+        feats["grade_num"]      = df["grade_num"]
+        feats["math_school"]    = df.get("math_school", df["school_avg"])
+        feats["science_school"] = df.get("science_school", df["school_avg"])
+        feats["arabic_school"]  = df.get("arabic_school", df["school_avg"])
+        feats["english_school"] = df.get("english_school", df["school_avg"])
+        # Interaction features
+        feats["avg_stem"]       = (feats["math_school"] + feats["science_school"]) / 2
+        feats["avg_lang"]       = (feats["arabic_school"] + feats["english_school"]) / 2
+        feats["stem_lang_ratio"]= feats["avg_stem"] / (feats["avg_lang"] + 1e-5)
+        self.feature_names      = feats.columns.tolist()
+        return feats.values
+
+    # ── Train ────────────────────────────────────────────────────────────────
+    def train(self, df: pd.DataFrame, target: str = "tahsili"):
+        X = self._build_features(df)
+        y = df[target].values
+        X_scaled = self.scaler.fit_transform(X)
+
+        results = {}
+        for name, model in self.models.items():
+            scores = cross_val_score(model, X_scaled, y, cv=5, scoring="neg_mean_absolute_error")
+            results[name] = -scores.mean()
+
+        self.best_model_name = min(results, key=results.get)
+        self.best_model = self.models[self.best_model_name]
+        self.best_model.fit(X_scaled, y)
+        self.is_trained = True
+        return results
+
+    # ── Predict ──────────────────────────────────────────────────────────────
+    def predict(self, df: pd.DataFrame) -> np.ndarray:
+        if not self.is_trained:
+            self.train(df)
+        X = self._build_features(df)
+        X_scaled = self.scaler.transform(X)
+        preds = self.best_model.predict(X_scaled)
+        return np.clip(preds, 20, 100)
+
+    def predict_single(self, school_avg, grade_num, math=None, science=None,
+                       arabic=None, english=None) -> float:
+        row = pd.DataFrame([{
+            "school_avg":     school_avg,
+            "grade_num":      grade_num,
+            "math_school":    math    or school_avg,
+            "science_school": science or school_avg,
+            "arabic_school":  arabic  or school_avg,
+            "english_school": english or school_avg,
+        }])
+        return float(self.predict(row)[0])
+
+    # ── Feature Importance ───────────────────────────────────────────────────
+    def get_feature_importance(self) -> pd.DataFrame:
+        if not self.is_trained:
+            return pd.DataFrame()
+        if hasattr(self.best_model, "feature_importances_"):
+            imp = self.best_model.feature_importances_
+        else:
+            imp = np.abs(self.best_model.coef_)
+        return pd.DataFrame({
+            "feature": self.feature_names,
+            "importance": imp
+        }).sort_values("importance", ascending=False)
+
+    # ── Confidence Interval ──────────────────────────────────────────────────
+    def confidence_interval(self, predicted: float, mae: float = 6.5):
+        low  = max(0,   predicted - 1.5 * mae)
+        high = min(100, predicted + 1.5 * mae)
+        return round(low, 1), round(high, 1)
+
+
+# ── Singleton ─────────────────────────────────────────────────────────────────
+_predictor = None
+
+def get_predictor() -> BawsalaPredictor:
+    global _predictor
+    if _predictor is None:
+        _predictor = BawsalaPredictor()
+    return _predictor
