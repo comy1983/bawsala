@@ -1,5 +1,4 @@
-"""
-pages/prediction.py  —  صفحة التنبؤ بالذكاء الاصطناعي
+الاصطناعي
 """
 
 import streamlit as st
