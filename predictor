@@ -1,5 +1,4 @@
-"""
-models/predictor.py
+.py
 نموذج التنبؤ بالنتائج - يستخدم Regression + خوارزميات AI
 """
 
