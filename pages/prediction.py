@@ -1,0 +1,186 @@
+"""
+pages/prediction.py  —  صفحة التنبؤ بالذكاء الاصطناعي
+"""
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from utils.data_manager import init_session
+from models.predictor import get_predictor
+
+
+def show():
+    init_session()
+    df = st.session_state.students_df
+    predictor = get_predictor()
+
+    st.markdown("<div class='section-header'>🤖 التنبؤ بالنتائج بالذكاء الاصطناعي</div>", unsafe_allow_html=True)
+
+    tab1, tab2 = st.tabs(["📈 تنبؤ جماعي", "👤 تنبؤ طالب واحد"])
+
+    # ── Tab 1: Batch Prediction ────────────────────────────────────────────────
+    with tab1:
+        st.markdown("<div class='bawsala-card'>", unsafe_allow_html=True)
+        st.markdown("#### تدريب النموذج وتقييمه")
+
+        target = st.selectbox("الهدف التنبؤي", ["tahsili", "qudurat", "nafis"],
+                              format_func=lambda x: {"tahsili":"التحصيلي","qudurat":"القدرات","nafis":"نافس"}[x])
+
+        if st.button("🚀 تدريب النموذج وتشغيل التنبؤ"):
+            with st.spinner("جاري تدريب النموذج..."):
+                results = predictor.train(df, target=target)
+                predictions = predictor.predict(df)
+
+                df_pred = df.copy()
+                df_pred["predicted"] = np.round(predictions, 1)
+                df_pred["actual"]    = df_pred[target]
+                df_pred["pred_error"]= (df_pred["predicted"] - df_pred["actual"]).abs().round(1)
+                st.session_state.predictions_df = df_pred
+                st.session_state.pred_target    = target
+                st.session_state.model_results  = results
+
+            st.success(f"✅ تم التدريب! أفضل نموذج: **{predictor.best_model_name}**")
+
+            # Model comparison
+            res_df = pd.DataFrame.from_dict(results, orient="index", columns=["MAE"]).round(2)
+            res_df.index.name = "النموذج"
+            res_df["MAE"] = res_df["MAE"].round(2)
+            col1, col2 = st.columns([1, 1.4])
+            with col1:
+                st.markdown("**مقارنة الخوارزميات (MAE)**")
+                st.dataframe(res_df, use_container_width=True)
+            with col2:
+                fig = px.bar(
+                    res_df.reset_index(), x="النموذج", y="MAE",
+                    color="MAE", color_continuous_scale=["#27ae60","#f39c12","#e74c3c"],
+                    text="MAE"
+                )
+                fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
+                                  font_family="Cairo", height=250,
+                                  margin=dict(t=10,b=10), coloraxis_showscale=False,
+                                  showlegend=False)
+                fig.update_traces(textposition="outside")
+                st.plotly_chart(fig, use_container_width=True)
+
+        # Show predictions if trained
+        if "predictions_df" in st.session_state:
+            df_pred   = st.session_state.predictions_df
+            tname_map = {"tahsili":"التحصيلي","qudurat":"القدرات","nafis":"نافس"}
+            tname     = tname_map[st.session_state.pred_target]
+
+            st.markdown(f"#### مقارنة الفعلي بالمتنبأ — {tname}")
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(
+                x=df_pred["actual"], y=df_pred["predicted"],
+                mode="markers",
+                marker=dict(
+                    color=df_pred["pred_error"],
+                    colorscale=["#27ae60","#f39c12","#e74c3c"],
+                    size=8, opacity=0.7,
+                    colorbar=dict(title="الخطأ")
+                ),
+                text=df_pred["name"],
+                hovertemplate="<b>%{text}</b><br>الفعلي: %{x:.1f}<br>المتنبأ: %{y:.1f}<extra></extra>"
+            ))
+            fig2.add_shape(type="line", x0=20,y0=20,x1=100,y1=100,
+                           line=dict(color="#aaa", dash="dot"))
+            fig2.update_layout(
+                plot_bgcolor="white", paper_bgcolor="white",
+                font_family="Cairo", height=400,
+                xaxis_title=f"الدرجة الفعلية ({tname})",
+                yaxis_title=f"الدرجة المتنبأ بها",
+                margin=dict(t=10,b=10)
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+            # Feature importance
+            feat_imp = predictor.get_feature_importance()
+            if not feat_imp.empty:
+                st.markdown("#### 🔑 أهمية المتغيرات في النموذج")
+                feat_labels = {
+                    "school_avg":"متوسط المدرسة","grade_num":"الصف",
+                    "math_school":"الرياضيات","science_school":"العلوم",
+                    "arabic_school":"العربي","english_school":"الإنجليزي",
+                    "avg_stem":"متوسط العلوم","avg_lang":"متوسط اللغات",
+                    "stem_lang_ratio":"نسبة العلوم/اللغات"
+                }
+                feat_imp["feature"] = feat_imp["feature"].map(feat_labels).fillna(feat_imp["feature"])
+                fig3 = px.bar(
+                    feat_imp.head(8), x="importance", y="feature",
+                    orientation="h", color="importance",
+                    color_continuous_scale=["#a0c4d4","#0a4f6e"],
+                )
+                fig3.update_layout(
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    font_family="Cairo", height=320,
+                    margin=dict(t=10,b=10), coloraxis_showscale=False,
+                    yaxis=dict(autorange="reversed"),
+                    xaxis_title="الأهمية", yaxis_title=""
+                )
+                st.plotly_chart(fig3, use_container_width=True)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── Tab 2: Single Student ──────────────────────────────────────────────────
+    with tab2:
+        st.markdown("<div class='bawsala-card'>", unsafe_allow_html=True)
+        st.markdown("#### 👤 تنبؤ تفصيلي لطالب واحد")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            school_avg = st.slider("متوسط المدرسة",  30.0, 100.0, 75.0, 0.5)
+            math_s     = st.slider("درجة الرياضيات", 30.0, 100.0, 72.0, 0.5)
+            science_s  = st.slider("درجة العلوم",    30.0, 100.0, 74.0, 0.5)
+        with c2:
+            grade_n    = st.selectbox("الصف", [1, 2, 3],
+                                      format_func=lambda x: ["أولى ثانوي","ثانية ثانوي","ثالثة ثانوي"][x-1])
+            arabic_s   = st.slider("درجة العربي",    30.0, 100.0, 78.0, 0.5)
+            english_s  = st.slider("درجة الإنجليزي", 30.0, 100.0, 70.0, 0.5)
+
+        if st.button("🔮 احسب التنبؤ"):
+            if not predictor.is_trained:
+                predictor.train(df)
+
+            pred_t = predictor.predict_single(school_avg, grade_n, math_s, science_s, arabic_s, english_s)
+            lo, hi = predictor.confidence_interval(pred_t)
+
+            # Score gauge
+            fig_gauge = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=pred_t,
+                delta={"reference": school_avg, "valueformat": ".1f"},
+                number={"suffix": "", "valueformat": ".1f", "font": {"size": 48, "family": "Cairo"}},
+                title={"text": "الدرجة المتوقعة (تحصيلي)", "font": {"size": 18, "family": "Cairo"}},
+                gauge={
+                    "axis": {"range": [0, 100]},
+                    "bar":  {"color": "#0a4f6e"},
+                    "steps": [
+                        {"range": [0,  50],  "color": "#fde8e8"},
+                        {"range": [50, 70],  "color": "#fef3cd"},
+                        {"range": [70, 100], "color": "#d4edda"},
+                    ],
+                    "threshold": {
+                        "line": {"color": "#e74c3c", "width": 3},
+                        "thickness": 0.75,
+                        "value": school_avg
+                    }
+                }
+            ))
+            fig_gauge.update_layout(height=300, font_family="Cairo", margin=dict(t=30,b=10))
+            st.plotly_chart(fig_gauge, use_container_width=True)
+
+            st.info(f"📊 نطاق التنبؤ بثقة 90%: من **{lo}** إلى **{hi}**")
+
+            gap = school_avg - pred_t
+            if gap > 20:
+                st.error(f"⚠️ فجوة حرجة: {gap:.1f} درجة — يحتاج إلى تدخل فوري")
+            elif gap > 10:
+                st.warning(f"⚡ فجوة متوسطة: {gap:.1f} درجة — يُنصح بخطة علاجية")
+            elif gap > 0:
+                st.info(f"ℹ️ فجوة بسيطة: {gap:.1f} درجة — متابعة دورية")
+            else:
+                st.success(f"✅ الطالب متوافق — أداء القياس أفضل من التوقع")
+
+        st.markdown("</div>", unsafe_allow_html=True)
