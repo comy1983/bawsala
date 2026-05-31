@@ -1,5 +1,4 @@
-"""
-pages/data_entry.py  —  صفحة إدخال البيانات
+البيانات
 """
 
 import streamlit as st
