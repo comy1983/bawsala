@@ -1,5 +1,4 @@
-"""
-utils/data_manager.py
+
 مدير البيانات - يتحكم في session state وتوليد البيانات التجريبية
 """
 
