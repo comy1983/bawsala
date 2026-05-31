@@ -1,14 +1,15 @@
 """
-pages/reports.py  —  صفحة التقارير والتوصيات
+pages/reports.py
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from utils.data_manager import init_session, risk_color
 
 
-def _recommendations(row) -> list[str]:
+def _recommendations(row):
     recs = []
     gap = row["gap"]
     if gap > 20:
@@ -42,7 +43,6 @@ def show():
 
     tab1, tab2, tab3 = st.tabs(["📊 تقرير المدرسة", "👤 تقرير طالب", "💡 خطة علاجية"])
 
-    # ── Tab 1: School Report ───────────────────────────────────────────────────
     with tab1:
         st.markdown(f"""
         <div class='bawsala-card'>
@@ -52,7 +52,6 @@ def show():
         </div>
         """, unsafe_allow_html=True)
 
-        # Risk distribution by grade
         st.markdown("<div class='section-header'>توزيع مستويات الخطر حسب الصف</div>", unsafe_allow_html=True)
         pivot = df.groupby(["grade", "risk_level"]).size().reset_index(name="العدد")
         fig = px.bar(
@@ -64,12 +63,12 @@ def show():
             barmode="stack",
             labels={"grade": "الصف", "risk_level": "المستوى"}
         )
-        fig.update_layout(plot_bgcolor="white", paper_bgcolor="white",
-                          font_family="Cairo", height=360,
-                          margin=dict(t=10, b=10))
+        fig.update_layout(
+            plot_bgcolor="white", paper_bgcolor="white",
+            font_family="Cairo", height=360, margin=dict(t=10, b=10)
+        )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Summary stats
         summary = df.groupby("grade").agg(
             عدد_الطلاب=("student_id", "count"),
             متوسط_المدرسة=("school_avg", "mean"),
@@ -78,11 +77,9 @@ def show():
         ).round(1).reset_index().rename(columns={"grade": "الصف"})
         st.dataframe(summary, use_container_width=True, hide_index=True)
 
-        # Export
         csv = df.to_csv(index=False, encoding="utf-8-sig")
         st.download_button("⬇️ تصدير التقرير الكامل", csv, "school_report.csv", "text/csv")
 
-    # ── Tab 2: Single Student Report ──────────────────────────────────────────
     with tab2:
         student_names = df["name"].tolist()
         sel = st.selectbox("اختر الطالب", student_names)
@@ -105,7 +102,6 @@ def show():
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Radar per student
         categories = ["المدرسة", "التحصيلي", "القدرات", "نافس"]
         values_radar = [row["school_avg"], row["tahsili"], row["qudurat"], row["nafis"]]
         fig2 = go.Figure(go.Scatterpolar(
@@ -116,12 +112,17 @@ def show():
         ))
         fig2.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
-            font_family="Cairo", height=350, margin=dict(t=30,b=30)
+            font_family="Cairo", height=350, margin=dict(t=30, b=30)
         )
         st.plotly_chart(fig2, use_container_width=True)
 
         risk = row["risk_level"]
-        badge = {"فجوة حرجة":"gap-critical","فجوة متوسطة":"gap-warning","متوافق":"gap-ok"}.get(risk,"gap-ok")
+        badge = {
+            "فجوة حرجة": "gap-critical",
+            "فجوة متوسطة": "gap-warning",
+            "متوافق": "gap-ok"
+        }.get(risk, "gap-ok")
+
         st.markdown(f"""
         <div class='bawsala-card'>
             <b>الصف:</b> {row['grade']} &nbsp;|&nbsp;
@@ -134,7 +135,6 @@ def show():
         for rec in _recommendations(row):
             st.markdown(f"- {rec}")
 
-    # ── Tab 3: Remedial Plan ───────────────────────────────────────────────────
     with tab3:
         critical_df = df[df["risk_level"] == "فجوة حرجة"].nlargest(20, "gap")
         st.markdown(f"#### الطلاب ذوو الفجوة الحرجة ({len(critical_df)} طالباً)")
@@ -146,11 +146,12 @@ def show():
                 with st.expander(f"⚠️ {row['name']} — فجوة {row['gap']:.1f} | {row['grade']}"):
                     cc1, cc2 = st.columns(2)
                     with cc1:
-                        st.metric("المدرسة",   f"{row['school_avg']:.1f}")
-                        st.metric("التحصيلي",  f"{row['tahsili']:.1f}")
+                        st.metric("المدرسة",  f"{row['school_avg']:.1f}")
+                        st.metric("التحصيلي", f"{row['tahsili']:.1f}")
                     with cc2:
-                        st.metric("القدرات",   f"{row['qudurat']:.1f}")
-                        st.metric("الفجوة",    f"{row['gap']:.1f}", delta=f"-{row['gap']:.1f}", delta_color="inverse")
+                        st.metric("القدرات",  f"{row['qudurat']:.1f}")
+                        st.metric("الفجوة",   f"{row['gap']:.1f}",
+                                  delta=f"-{row['gap']:.1f}", delta_color="inverse")
                     st.markdown("**الخطة العلاجية:**")
                     for rec in _recommendations(row):
                         st.markdown(f"  {rec}")
